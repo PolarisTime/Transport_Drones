@@ -1,13 +1,17 @@
+-- 供应仓库模块 - 处理提供物品给道路网络的仓库逻辑 (Supply depot module - handles depots that provide items to the road network)
 local supply_depot = {}
 
+-- 设置元表以启用面向对象方法调用 (Set metatable to enable object-oriented method calls)
 supply_depot.metatable = {__index = supply_depot}
 
+-- 尸体偏移量配置 - 基于仓库方向的无人机停靠位置 (Corpse offset configuration - drone docking positions based on depot direction)
+-- 方向值对应Factorio的defines.direction枚举 (Direction values correspond to Factorio's defines.direction enum)
 supply_depot.corpse_offsets =
 {
-  [0] = {0, -2},
-  [4] = {2, 0},
-  [8] = {0, 2},
-  [12] = {-2, 0},
+  [0] = {0, -2}, -- 北方向 (North direction)
+  [4] = {2, 0}, -- 东方向 (East direction)
+  [8] = {0, 2}, -- 南方向 (South direction)
+  [12] = {-2, 0}, -- 西方向 (West direction)
 }
 
 local get_corpse_position = function(entity)
@@ -19,28 +23,41 @@ local get_corpse_position = function(entity)
 
 end
 
+-- 创建新的供应仓库实例 (Create new supply depot instance)
+-- @param entity: 组装机实体（被转换为仓库） (Assembler entity to be converted into depot)
+-- @param tags: 蓝图标签数据 (Blueprint tag data)
 function supply_depot.new(entity, tags)
   local position = entity.position
   local force = entity.force
   local surface = entity.surface
-  entity.destructible = false
-  entity.minable = false
-  entity.rotatable = false
-  entity.active = false
-  local chest = surface.create_entity{name = "supply-depot-chest", position = position, force = force, player = entity.last_user}
+  
+  -- 设置组装机属性以防止玩家交互 (Set assembler properties to prevent player interaction)
+  entity.destructible = false -- 不可被破坏 (Cannot be destroyed)
+  entity.minable = false -- 不可被挖掘 (Cannot be mined)
+  entity.rotatable = false -- 不可旋转 (Cannot be rotated)
+  entity.active = false -- 停用（不运行配方） (Inactive - won't run recipes)
+  
+  -- 使用surface.create_entity创建供应仓库箱子实体 (Create supply depot chest entity using surface.create_entity)
+  local chest = surface.create_entity{
+    name = "supply-depot-chest", -- 实体原型名称 (Entity prototype name)
+    position = position, -- 与组装机相同位置 (Same position as assembler)
+    force = force, -- 相同势力 (Same force)
+    player = entity.last_user -- 建造者信息 (Builder information)
+  }
 
+  -- 创建仓库对象 (Create depot object)
   local depot =
   {
-    entity = chest,
-    assembler = entity,
-    to_be_taken = {},
-    index = tostring(chest.unit_number),
-    old_contents = {}
+    entity = chest, -- 主要实体引用（箱子） (Primary entity reference - chest)
+    assembler = entity, -- 原始组装机引用 (Original assembler reference)
+    to_be_taken = {}, -- 待取物品跟踪表 (Items to be taken tracking table)
+    index = tostring(chest.unit_number), -- 唯一标识符 (Unique identifier)
+    old_contents = {} -- 上一次的物品内容（用于增量更新） (Previous contents for incremental updates)
   }
-  setmetatable(depot, supply_depot.metatable)
+  setmetatable(depot, supply_depot.metatable) -- 设置元表 (Set metatable)
 
-  depot:get_corpse()
-  depot:read_tags(tags)
+  depot:get_corpse() -- 创建无人机停靠点 (Create drone docking point)
+  depot:read_tags(tags) -- 读取蓝图数据 (Read blueprint data)
 
   return depot
 
@@ -137,18 +154,26 @@ function supply_depot:say(string)
   -- self.entity.surface.create_entity{name = "tutorial-flying-text", position = self.entity.position, text = string}
 end
 
+-- 从供应仓库中取出物品给无人机 (Take items from supply depot for drone)
+-- @param requested_name: 物品名称 (Item name)
+-- @param requested_quality: 物品质量 (Item quality)
+-- @param requested_count: 请求数量 (Requested count)
+-- @return: 实际取出的数量 (Actually removed count)
 function supply_depot:give_item(requested_name,requested_quality, requested_count)
-  local inventory = self.entity.get_output_inventory()
+  local inventory = self.entity.get_output_inventory() -- 获取输出物品栏 (Get output inventory)
+  -- 使用inventory.remove从物品栏中移除物品 (Use inventory.remove to remove items from inventory)
   local removed_count = inventory.remove({name = requested_name,quality = requested_quality, count = requested_count})
   return removed_count
 end
 
+-- 添加待取物品计数 - 预留将要被无人机取走的物品 (Add to-be-taken count - reserve items that will be taken by drones)
 function supply_depot:add_to_be_taken(name,quality, count)
   --if not (name and count) then return end
   self.to_be_taken[name..quality] = (self.to_be_taken[name..quality] or 0) + count
   --self:say(name.." - "..self.to_be_taken[name]..": "..count)
 end
 
+-- 获取可用物品数量（总数减去已预留的） (Get available item count - total minus reserved)
 function supply_depot:get_available_item_count(name, quality)
   return self.entity.get_output_inventory().get_item_count({name = name,quality = quality}) - self:get_to_be_taken(name,quality)
 end

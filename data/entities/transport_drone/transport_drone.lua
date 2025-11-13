@@ -1,14 +1,19 @@
-local affected_by_tiles = true
+-- 传输无人机实体定义 - 数据阶段原型定义 (Transport drone entity definition - data stage prototype definition)
+local affected_by_tiles = true -- 是否受地面类型影响移动速度 (Whether movement speed is affected by tile type)
 
+-- 加载模组工具函数 (Load mod utility functions)
 local util = require "__Transport_Drones_Meglinge_Fork__/data/tf_util/tf_util"
 
+-- 从模组设置中获取燃料流体类型 (Get fuel fluid type from mod settings)
 local fuel = settings.startup["fuel-fluid"].value
+-- 验证选择的燃料流体是否存在，如果不存在则回退到默认选项 (Validate selected fuel fluid exists, fallback to defaults if not)
 if not data.raw.fluid[fuel] then
-  log("Bad name for fuel fluid. reverting to something else...")
+  log("Bad name for fuel fluid. reverting to something else...") -- 记录错误信息 (Log error message)
 
-  fuel = "petroleum-gas"
+  fuel = "petroleum-gas" -- 尝试使用石油气 (Try petroleum gas)
   if not data.raw.fluid[fuel] then
     fuel = nil
+    -- 查找任何有燃料值的流体 (Find any fluid with fuel value)
     for k, fluid in pairs (data.raw.fluid) do
       if fluid.fuel_value then
         fuel = fluid.name
@@ -17,6 +22,7 @@ if not data.raw.fluid[fuel] then
     end
   end
 
+  -- 如果找不到燃料流体，使用第一个可用的流体 (If no fuel fluid found, use first available fluid)
   if not fuel then
     local index, fluid = next(data.raw.fluid)
     if fluid then

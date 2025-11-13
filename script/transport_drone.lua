@@ -1,35 +1,44 @@
+-- 加载共享模块和运输科技模块 (Load shared modules and transport technologies)
 local shared = require("shared")
 local transport_technologies = require("script/transport_technologies")
 
-local fuel_amount_per_drone = shared.fuel_amount_per_drone
-local fuel_consumption_per_meter = shared.fuel_consumption_per_meter
-local drone_pollution_per_second = shared.drone_pollution_per_second
+-- 从共享模块获取无人机配置参数 (Get drone configuration parameters from shared module)
+local fuel_amount_per_drone = shared.fuel_amount_per_drone -- 每架无人机的燃料量 (Fuel amount per drone)
+local fuel_consumption_per_meter = shared.fuel_consumption_per_meter -- 每米燃料消耗 (Fuel consumption per meter)
+local drone_pollution_per_second = shared.drone_pollution_per_second -- 每秒污染排放 (Pollution emissions per second)
 
+-- 脚本数据存储全局无人机状态 (Script data stores global drone state)
 local script_data =
 {
-  drones = {},
-  riding_players = {},
-  reset_to_be_taken_again = true,
-  reset_fuel_on_the_way = true
+  drones = {}, -- 存储所有活动无人机的字典，键为unit_number (Dictionary storing all active drones, keyed by unit_number)
+  riding_players = {}, -- 存储正在骑乘无人机的玩家 (Players currently riding drones)
+  reset_to_be_taken_again = true, -- 重置标志：重新计算待取物品 (Reset flag: recalculate items to be taken)
+  reset_fuel_on_the_way = true -- 重置标志：重新计算运输中的燃料 (Reset flag: recalculate fuel on the way)
 }
 
+-- 燃料流体缓存和获取函数 (Fuel fluid cache and getter function)
 local fuel_fluid
 local get_fuel_fluid = function()
   if fuel_fluid then
-    return fuel_fluid
+    return fuel_fluid -- 返回缓存的燃料流体名称 (Return cached fuel fluid name)
   end
+  -- 从燃料仓库配方中获取燃料流体名称 (Get fuel fluid name from fuel depot recipe)
   fuel_fluid = prototypes.recipe["fuel-depots"].products[1].name
   return fuel_fluid
 end
 
+-- 传输无人机类和元表定义 (Transport drone class and metatable definition)
 local transport_drone = {}
 
+-- 设置元表以启用面向对象方法调用 (Set metatable to enable object-oriented method calls)
 transport_drone.metatable = {__index = transport_drone}
 
+-- 将无人机添加到全局跟踪字典中 (Add drone to global tracking dictionary)
 local add_drone = function(drone)
   script_data.drones[drone.index] = drone
 end
 
+-- 从全局跟踪字典中移除无人机 (Remove drone from global tracking dictionary)
 local remove_drone = function(drone)
   script_data.drones[drone.index] = nil
 end
@@ -52,12 +61,13 @@ local get_drone = function(index)
 end
 
 
+-- 无人机状态枚举 (Drone state enumeration)
 local states =
 {
-  going_to_supply = 1,
-  return_to_requester = 2,
-  waiting_for_reorder = 3,
-  delivering_fuel = 4
+  going_to_supply = 1, -- 前往供应仓库 (Going to supply depot)
+  return_to_requester = 2, -- 返回请求仓库 (Returning to request depot)
+  waiting_for_reorder = 3, -- 等待重新分配任务 (Waiting for reorder)
+  delivering_fuel = 4 -- 运送燃料 (Delivering fuel)
 }
 
 local get_drone_speed = function(force_index)
@@ -109,8 +119,12 @@ local player_enter_drone = function(player, drone)
 end
 
 
+-- 创建新的传输无人机实例 (Create new transport drone instance)
+-- @param request_depot: 请求仓库对象 (Request depot object)
+-- @param drone_name: 无人机名称（可选，用于特殊外观） (Drone name, optional for special appearance)
 transport_drone.new = function(request_depot, drone_name)
 
+  -- 获取仓库的尸体位置用于无人机生成 (Get depot corpse position for drone spawning)
   local corpse = request_depot.corpse
   if not (corpse and corpse.valid) then
     if request_depot.get_corpse then
@@ -118,25 +132,31 @@ transport_drone.new = function(request_depot, drone_name)
     end
   end
   if not (corpse and corpse.valid) then
-    error("No corpse found")
+    error("No corpse found") -- 如果找不到尸体位置，抛出错误 (Throw error if corpse position not found)
   end
 
-  local entity = request_depot.entity.surface.create_entity{name = get_drone_name(drone_name), position = corpse.position, force = request_depot.entity.force}
+  -- 使用surface.create_entity创建无人机实体 (Create drone entity using surface.create_entity)
+  local entity = request_depot.entity.surface.create_entity{
+    name = get_drone_name(drone_name), -- 获取无人机实体名称 (Get drone entity name)
+    position = corpse.position, -- 在尸体位置生成 (Spawn at corpse position)
+    force = request_depot.entity.force -- 设置为与仓库相同的势力 (Set to same force as depot)
+  }
   if not (entity and entity.valid) then return end
 
+  -- 创建无人机对象并设置初始属性 (Create drone object and set initial properties)
   local drone =
   {
-    entity = entity,
-    request_depot = request_depot,
-    index = tostring(entity.unit_number),
-    state = 0,
-    requested_count = 0,
-    tick_created = game.tick
+    entity = entity, -- 游戏中的实体引用 (Game entity reference)
+    request_depot = request_depot, -- 归属的请求仓库 (Owning request depot)
+    index = tostring(entity.unit_number), -- 唯一标识符 (Unique identifier)
+    state = 0, -- 当前状态（初始为0） (Current state, initially 0)
+    requested_count = 0, -- 请求的物品数量 (Requested item count)
+    tick_created = game.tick -- 创建时的游戏刻度 (Game tick when created)
   }
-  setmetatable(drone, transport_drone.metatable)
-  add_drone(drone)
+  setmetatable(drone, transport_drone.metatable) -- 设置元表以启用方法调用 (Set metatable to enable method calls)
+  add_drone(drone) -- 将无人机添加到全局跟踪 (Add drone to global tracking)
 
-  --entity.ai_settings.path_resolution_modifier = 0
+  --entity.ai_settings.path_resolution_modifier = 0 -- AI设置，已注释 (AI settings, commented out)
 
   return drone
 end
@@ -616,25 +636,28 @@ function transport_drone:say(text)
   -- self.entity.surface.create_entity{name = "tutorial-flying-text", position = self.entity.position, text = text}
 end
 
+-- 让无人机移动到指定位置 (Make drone move to specified position)
+-- 使用Factorio的command系统控制单位移动 (Use Factorio's command system to control unit movement)
 function transport_drone:go_to_position(position, radius)
   self.entity.set_command
   {
-    type = defines.command.go_to_location,
-    destination = position,
-    radius = radius or 1,
-    distraction = defines.distraction.none,
-    pathfind_flags = {prefer_straight_paths = false, use_cache = false},
+    type = defines.command.go_to_location, -- 移动到位置命令类型 (Go to location command type)
+    destination = position, -- 目标位置 (Target position)
+    radius = radius or 1, -- 接受半径，默认1格 (Acceptance radius, default 1 tile)
+    distraction = defines.distraction.none, -- 不允许分心 (No distractions allowed)
+    pathfind_flags = {prefer_straight_paths = false, use_cache = false}, -- 寻路标志 (Pathfinding flags)
   }
 end
 
+-- 让无人机移动到指定实体位置 (Make drone move to specified entity position)
 function transport_drone:go_to_entity(entity, radius)
   self.entity.set_command
   {
-    type = defines.command.go_to_location,
-    destination_entity = entity,
-    radius = radius or 1,
-    distraction = defines.distraction.none,
-    pathfind_flags = {prefer_straight_paths = false, use_cache = false}
+    type = defines.command.go_to_location, -- 移动到位置命令类型 (Go to location command type)
+    destination_entity = entity, -- 目标实体 (Target entity)
+    radius = radius or 1, -- 接受半径，默认1格 (Acceptance radius, default 1 tile)
+    distraction = defines.distraction.none, -- 不允许分心 (No distractions allowed)
+    pathfind_flags = {prefer_straight_paths = false, use_cache = false} -- 寻路标志 (Pathfinding flags)
   }
 end
 
@@ -844,22 +867,29 @@ local set_map_settings = function()
   game.map_settings.path_finder.use_path_cache = false
 end
 
+-- 事件注册表 - 定义此模块监听的所有Factorio事件 (Event registration table - defines all Factorio events this module listens to)
 transport_drone.events =
 {
+  -- 实体建造事件（已注释） (Entity construction events, commented out)
   --[defines.events.on_built_entity] = on_built_entity,
   --[defines.events.on_robot_built_entity] = on_built_entity,
   --[defines.events.script_raised_revive] = on_built_entity,
   --[defines.events.script_raised_built] = on_built_entity,
 
+  -- 实体移除事件 - 玩家挖掘和机器人挖掘 (Entity removal events - player mining and robot mining)
   [defines.events.on_player_mined_entity] = on_entity_removed,
   [defines.events.on_robot_mined_entity] = on_entity_removed,
 
+  -- 实体死亡事件 - 自然死亡和脚本销毁 (Entity death events - natural death and script destruction)
   [defines.events.on_entity_died] = on_entity_removed,
   [defines.events.script_raised_destroy] = on_entity_removed,
 
+  -- AI命令完成事件 - 当无人机完成移动命令时触发 (AI command completed event - triggered when drone finishes movement command)
   [defines.events.on_ai_command_completed] = on_ai_command_completed,
 
+  -- 自定义热键事件 - 跟随无人机 (Custom hotkey event - follow drone)
   ["follow-drone"] = follow_drone_hotkey,
+  -- 每游戏刻事件 - 用于玩家骑乘无人机时的位置同步 (Per-game-tick event - for position sync when players ride drones)
   [defines.events.on_tick] = on_tick,
 }
 
